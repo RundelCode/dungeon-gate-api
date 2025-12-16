@@ -23,9 +23,10 @@ import { RealtimeGateway } from './modules/realtime/realtime.gateway';
 import { AppConfigModule } from './config/config.module';
 import { HealthModule } from './health/health.module';
 import { SupabaseModule } from './db/supabase.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 
 @Module({
-  imports: [AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
+  imports: [UploadsModule, AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
   controllers: [AppController],
   providers: [AppService, RealtimeGateway],
 })

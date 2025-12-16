@@ -78,7 +78,6 @@ export class GamesService {
 
         if (error) throw error;
 
-        // Validar que el usuario pertenece a la partida
         const isMember = data.game_players.some(
             (p) => p.user_id === userId && p.is_active,
         );
@@ -188,5 +187,120 @@ export class GamesService {
 
         return { success: true };
     }
+
+    async leaveGame(gameId: string, userId: string) {
+        const { data, error } = await this.supabase
+            .from('game_players')
+            .select('id, role')
+            .eq('game_id', gameId)
+            .eq('user_id', userId)
+            .eq('is_active', true)
+            .single();
+
+        if (error || !data) {
+            throw new BadRequestException('Not part of this game');
+        }
+
+        if (data.role === 'dm') {
+            throw new ForbiddenException('DM cannot leave the game');
+        }
+
+        const { error: updateError } = await this.supabase
+            .from('game_players')
+            .update({ is_active: false })
+            .eq('id', data.id);
+
+        if (updateError) throw updateError;
+
+        return { success: true };
+    }
+
+    async getPlayers(gameId: string, userId: string) {
+        await this.findOne(gameId, userId);
+
+        const { data, error } = await this.supabase
+            .from('game_players')
+            .select(`
+      user_id,
+      role,
+      is_active,
+      users (
+        id,
+        display_name,
+        avatar_url
+      )
+    `)
+            .eq('game_id', gameId)
+            .eq('is_active', true);
+
+        if (error) throw error;
+        return data;
+    }
+
+    async kickPlayer(gameId: string, dmId: string, targetUserId: string) {
+        await this.assertDm(gameId, dmId);
+
+        if (dmId === targetUserId) {
+            throw new BadRequestException('DM cannot kick himself');
+        }
+
+        const { error } = await this.supabase
+            .from('game_players')
+            .update({ is_active: false })
+            .eq('game_id', gameId)
+            .eq('user_id', targetUserId)
+            .eq('is_active', true);
+
+        if (error) throw error;
+
+        return { success: true };
+    }
+
+    async updateStatus(
+        gameId: string,
+        userId: string,
+        status: 'active' | 'paused' | 'archived',
+    ) {
+        await this.assertDm(gameId, userId);
+
+        const { error } = await this.supabase
+            .from('games')
+            .update({
+                status,
+                updated_at: new Date(),
+            })
+            .eq('id', gameId);
+
+        if (error) throw error;
+
+        return { success: true };
+    }
+
+    async transferDm(gameId: string, currentDmId: string, newDmId: string) {
+        await this.assertDm(gameId, currentDmId);
+
+        if (currentDmId === newDmId) {
+            throw new BadRequestException('Already DM');
+        }
+
+        await this.supabase
+            .from('game_players')
+            .update({ role: 'player' })
+            .eq('game_id', gameId)
+            .eq('user_id', currentDmId);
+
+        const { error } = await this.supabase
+            .from('game_players')
+            .update({ role: 'dm' })
+            .eq('game_id', gameId)
+            .eq('user_id', newDmId)
+            .eq('is_active', true);
+
+        if (error) throw error;
+
+        return { success: true };
+    }
+
+
 
 }

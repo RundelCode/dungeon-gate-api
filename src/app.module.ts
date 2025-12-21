@@ -19,15 +19,16 @@ import { BackgroundsModule } from './modules/backgrounds/backgrounds.module';
 import { SpellsModule } from './modules/spells/spells.module';
 import { ItemsModule } from './modules/items/items.module'; 
 import { ConditionsModule } from './modules/conditions/conditions.module';
-import { RealtimeGateway } from './modules/realtime/realtime.gateway';
+import { GameGateway } from './modules/realtime/game.gateway';
 import { AppConfigModule } from './config/config.module';
 import { HealthModule } from './health/health.module';
 import { SupabaseModule } from './db/supabase.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { SpellCastingModule } from './modules/spell-casting/spell-casting.module';
 
 @Module({
-  imports: [UploadsModule, AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
+  imports: [UploadsModule,SpellCastingModule, AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
   controllers: [AppController],
-  providers: [AppService, RealtimeGateway],
+  providers: [AppService, GameGateway],
 })
 export class AppModule { }

@@ -3,36 +3,38 @@ import {
     ExecutionContext,
     Injectable,
     UnauthorizedException,
+    Inject,
 } from '@nestjs/common';
-import { jwtVerify } from 'jose';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+    constructor(
+        @Inject('SUPABASE_ANON_CLIENT')
+        private readonly supabase: SupabaseClient,
+    ) { }
+
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const req = context.switchToHttp().getRequest();
-        const authHeader = req.headers.authorization;
 
-        if (!authHeader?.startsWith('Bearer ')) {
-            throw new UnauthorizedException('Missing token');
+        const authHeader = req.headers['authorization'];
+        if (!authHeader) {
+            throw new UnauthorizedException('No token provided');
         }
 
         const token = authHeader.replace('Bearer ', '');
 
-        try {
-            const secret = new TextEncoder().encode(
-                process.env.SUPABASE_JWT_SECRET,
-            );
+        const { data, error } = await this.supabase.auth.getUser(token);
 
-            const { payload } = await jwtVerify(token, secret);
-
-            req.user = {
-                id: payload.sub,
-                email: payload.email,
-            };
-
-            return true;
-        } catch {
+        if (error || !data?.user) {
             throw new UnauthorizedException('Invalid token');
         }
+
+        req.user = {
+            id: data.user.id,
+            email: data.user.email,
+        };
+
+        return true;
     }
 }

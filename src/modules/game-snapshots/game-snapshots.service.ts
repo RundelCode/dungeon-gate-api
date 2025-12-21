@@ -5,7 +5,6 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { CreateSnapshotDto } from './dto/create-snapshot.dto';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -43,30 +42,55 @@ export class GameSnapshotsService {
         }
     }
 
+    async createAutoSnapshot(gameId: string, label: string) {
+        const [
+            game,
+            actors,
+            combats,
+            participants,
+            tokens,
+            scenes,
+            conditions,
+        ] = await Promise.all([
+            this.supabase.from('games').select('*').eq('id', gameId).single(),
+            this.supabase.from('actors_in_game').select('*').eq('game_id', gameId),
+            this.supabase.from('combats').select('*').eq('game_id', gameId).eq('is_active', true),
+            this.supabase.from('combat_participants').select('*'),
+            this.supabase.from('tokens').select('*'),
+            this.supabase.from('scenes').select('*').eq('game_id', gameId),
+            this.supabase.from('actor_conditions').select('*'),
+        ]);
 
-    async create(
-        gameId: string,
-        userId: string,
-        dto: CreateSnapshotDto,
-    ) {
-        await this.assertDm(gameId, userId);
+        const snapshot = {
+            game: game.data,
+            actors: actors.data ?? [],
+            combat: combats.data?.[0] ?? null,
+            combat_participants: participants.data ?? [],
+            tokens: tokens.data ?? [],
+            scenes: scenes.data ?? [],
+            conditions: conditions.data ?? [],
+            created_at: new Date().toISOString(),
+            label,
+        };
 
-        const snapshotId = randomUUID();
+        await this.supabase.from('game_snapshots').insert({
+            id: randomUUID(),
+            game_id: gameId,
+            label,
+            state_json: snapshot,
+        });
 
-        const { error } = await this.supabase
-            .from('game_snapshots')
-            .insert({
-                id: snapshotId,
-                game_id: gameId,
-                label: dto.label,
-                state_json: dto.state_json,
-            });
-
-        if (error) throw error;
-
-        return this.findOne(gameId, snapshotId, userId);
+        return snapshot;
     }
 
+    async createManual(
+        gameId: string,
+        userId: string,
+        label: string,
+    ) {
+        await this.assertDm(gameId, userId);
+        return this.createAutoSnapshot(gameId, label);
+    }
 
     async findAll(gameId: string, userId: string) {
         await this.assertMember(gameId, userId);
@@ -80,7 +104,6 @@ export class GameSnapshotsService {
         if (error) throw error;
         return data;
     }
-
 
     async findOne(
         gameId: string,
@@ -102,7 +125,6 @@ export class GameSnapshotsService {
 
         return data;
     }
-
 
     async restore(
         gameId: string,

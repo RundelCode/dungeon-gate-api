@@ -7,6 +7,9 @@ export class PerformAttackDto {
     @IsUUID()
     target_actor_id: string;
 
+    @IsUUID()
+    attack_id: string;
+
     @IsOptional()
     @IsBoolean()
     advantage?: boolean;

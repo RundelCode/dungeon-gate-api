@@ -24,6 +24,7 @@ export class ActorsInGameService {
     private d20(): number {
         return Math.floor(Math.random() * 20) + 1;
     }
+
     private async checkConcentration(
         actor: any,
         damage: number,
@@ -50,9 +51,7 @@ export class ActorsInGameService {
 
         await this.supabase
             .from('actors_in_game')
-            .update({
-                resources_json: resources,
-            })
+            .update({ resources_json: resources })
             .eq('id', actor.id);
 
         this.realtime.emitToGame(gameId, 'spell.concentration.broken', {
@@ -70,9 +69,6 @@ export class ActorsInGameService {
             },
         });
     }
-
-
-
 
     private async assertMember(gameId: string, userId: string) {
         const { data } = await this.supabase
@@ -108,27 +104,25 @@ export class ActorsInGameService {
             (!dto.base_character_id && !dto.base_monster_id) ||
             (dto.base_character_id && dto.base_monster_id)
         ) {
-            throw new BadRequestException(
-                'Actor must reference either a character or a monster',
-            );
+            throw new BadRequestException('Actor must reference either a character or a monster');
         }
 
         const actorId = randomUUID();
 
-        const { error } = await this.supabase
-            .from('actors_in_game')
-            .insert({
-                id: actorId,
-                game_id: gameId,
-                base_character_id: dto.base_character_id,
-                base_monster_id: dto.base_monster_id,
-                name_override: dto.name_override,
-                current_hp: dto.current_hp,
-                temp_hp: dto.temp_hp ?? 0,
-                max_hp_override: dto.max_hp_override,
-            });
-
-        if (error) throw error;
+        await this.supabase.from('actors_in_game').insert({
+            id: actorId,
+            game_id: gameId,
+            base_character_id: dto.base_character_id,
+            base_monster_id: dto.base_monster_id,
+            name_override: dto.name_override,
+            current_hp: dto.current_hp,
+            temp_hp: dto.temp_hp ?? 0,
+            max_hp_override: dto.max_hp_override,
+            death_saves_success: 0,
+            death_saves_fail: 0,
+            is_conscious: true,
+            is_stable: true,
+        });
 
         return this.findOne(actorId, userId);
     }
@@ -136,24 +130,23 @@ export class ActorsInGameService {
     async findAll(gameId: string, userId: string) {
         await this.assertMember(gameId, userId);
 
-        const { data, error } = await this.supabase
+        const { data } = await this.supabase
             .from('actors_in_game')
             .select('*')
             .eq('game_id', gameId)
             .order('created_at');
 
-        if (error) throw error;
         return data;
     }
 
     async findOne(actorId: string, userId: string) {
-        const { data, error } = await this.supabase
+        const { data } = await this.supabase
             .from('actors_in_game')
             .select('*')
             .eq('id', actorId)
             .single();
 
-        if (error || !data) {
+        if (!data) {
             throw new NotFoundException('Actor not found');
         }
 
@@ -168,85 +161,20 @@ export class ActorsInGameService {
             .eq('id', actorId)
             .single();
 
-        if (!actor) throw new NotFoundException('Actor not found');
+        if (!actor) {
+            throw new NotFoundException('Actor not found');
+        }
 
         await this.assertDm(actor.game_id, userId);
 
-        const { data, error } = await this.supabase
+        const { data } = await this.supabase
             .from('actors_in_game')
-            .update({
-                ...dto,
-                updated_at: new Date(),
-            })
+            .update({ ...dto, updated_at: new Date() })
             .eq('id', actorId)
             .select()
             .single();
 
-        if (error) throw error;
         return data;
-    }
-
-    async remove(actorId: string, userId: string) {
-        const { data: actor } = await this.supabase
-            .from('actors_in_game')
-            .select('game_id')
-            .eq('id', actorId)
-            .single();
-
-        if (!actor) throw new NotFoundException('Actor not found');
-
-        await this.assertDm(actor.game_id, userId);
-
-        const { error } = await this.supabase
-            .from('actors_in_game')
-            .delete()
-            .eq('id', actorId);
-
-        if (error) throw error;
-
-        return { success: true };
-    }
-
-    async spawnFromCharacter(
-        gameId: string,
-        characterId: string,
-        userId: string,
-        nameOverride?: string,
-    ) {
-        await this.assertDm(gameId, userId);
-
-        const { data: character } = await this.supabase
-            .from('characters')
-            .select('*')
-            .eq('id', characterId)
-            .single();
-
-        if (!character) {
-            throw new NotFoundException('Character not found');
-        }
-
-        const actorId = randomUUID();
-
-        const { error } = await this.supabase
-            .from('actors_in_game')
-            .insert({
-                id: actorId,
-                game_id: gameId,
-                base_character_id: character.id,
-                name_override: nameOverride ?? character.name,
-                current_hp: character.max_hp,
-                temp_hp: 0,
-                max_hp_override: character.max_hp,
-                resources_json: {},
-                death_saves_success: 0,
-                death_saves_fail: 0,
-                is_conscious: true,
-                is_stable: true,
-            });
-
-        if (error) throw error;
-
-        return this.findOne(actorId, userId);
     }
 
     async updateHp(
@@ -257,13 +185,17 @@ export class ActorsInGameService {
         const { data: actor } = await this.supabase
             .from('actors_in_game')
             .select(`
-      id,
-      game_id,
-      current_hp,
-      temp_hp,
-      resources_json,
-      base_character_id
-    `)
+                id,
+                game_id,
+                current_hp,
+                temp_hp,
+                resources_json,
+                base_character_id,
+                death_saves_success,
+                death_saves_fail,
+                is_conscious,
+                is_stable
+            `)
             .eq('id', actorId)
             .single();
 
@@ -271,9 +203,7 @@ export class ActorsInGameService {
             throw new NotFoundException('Actor not found');
         }
 
-        const gameId = actor.game_id;
-
-        await this.assertDm(gameId, userId);
+        await this.assertDm(actor.game_id, userId);
 
         let remainingDelta = dto.delta;
         let tempHp = actor.temp_hp;
@@ -288,51 +218,145 @@ export class ActorsInGameService {
         hp += remainingDelta;
         if (hp < 0) hp = 0;
 
+        let deathSuccess = actor.death_saves_success;
+        let deathFail = actor.death_saves_fail;
+        let isConscious = actor.is_conscious;
+        let isStable = actor.is_stable;
+
+        if (hp === 0 && actor.current_hp > 0) {
+            isConscious = false;
+            isStable = false;
+        }
+
+        if (hp === 0 && actor.current_hp === 0 && dto.delta < 0) {
+            deathFail += 1;
+        }
+
+        if (hp > 0) {
+            isConscious = true;
+            isStable = true;
+            deathSuccess = 0;
+            deathFail = 0;
+        }
+
         const { data: updated } = await this.supabase
             .from('actors_in_game')
             .update({
                 current_hp: hp,
                 temp_hp: tempHp,
+                death_saves_success: deathSuccess,
+                death_saves_fail: deathFail,
+                is_conscious: isConscious,
+                is_stable: isStable,
                 updated_at: new Date(),
             })
             .eq('id', actorId)
             .select()
             .single();
 
-        this.realtime.emitToGame(gameId, 'actor.hp.updated', {
+        this.realtime.emitToGame(actor.game_id, 'actor.hp.updated', {
             actor_id: actorId,
-            game_id: gameId,
             current_hp: updated.current_hp,
             temp_hp: updated.temp_hp,
-            delta: dto.delta,
+            is_conscious: updated.is_conscious,
         });
 
         await this.supabase.from('game_logs').insert({
             id: crypto.randomUUID(),
-            game_id: gameId,
+            game_id: actor.game_id,
             actor_in_game_id: actorId,
             action_type: 'actor.hp.updated',
             payload: {
-                before: {
-                    current_hp: actor.current_hp,
-                    temp_hp: actor.temp_hp,
-                },
-                after: {
-                    current_hp: updated.current_hp,
-                    temp_hp: updated.temp_hp,
-                },
                 delta: dto.delta,
+                current_hp: updated.current_hp,
             },
         });
 
         if (dto.delta < 0 && actor.resources_json?.concentration) {
-            await this.checkConcentration(
-                actor,
-                Math.abs(dto.delta),
-                gameId,
-            );
+            await this.checkConcentration(actor, Math.abs(dto.delta), actor.game_id);
         }
 
         return updated;
+    }
+
+    async rollDeathSave(actorId: string, userId: string) {
+        const { data: actor } = await this.supabase
+            .from('actors_in_game')
+            .select(`
+                id,
+                game_id,
+                death_saves_success,
+                death_saves_fail,
+                is_conscious,
+                is_stable
+            `)
+            .eq('id', actorId)
+            .single();
+
+        if (!actor || actor.is_conscious || actor.is_stable) {
+            throw new BadRequestException('Actor does not need death saves');
+        }
+
+        await this.assertMember(actor.game_id, userId);
+
+        const roll = this.d20();
+
+        let success = actor.death_saves_success;
+        let fail = actor.death_saves_fail;
+        let isStable = actor.is_stable;
+
+        if (roll === 20) {
+            isStable = true;
+            success = 3;
+        } else if (roll === 1) {
+            fail += 2;
+        } else if (roll >= 10) {
+            success += 1;
+        } else {
+            fail += 1;
+        }
+
+        const isDead = fail >= 3;
+
+        await this.supabase
+            .from('actors_in_game')
+            .update({
+                death_saves_success: success,
+                death_saves_fail: fail,
+                is_stable: isStable,
+                is_conscious: false,
+            })
+            .eq('id', actorId);
+
+        this.realtime.emitToGame(actor.game_id, 'actor.death.save', {
+            actor_id: actorId,
+            roll,
+            success,
+            fail,
+            is_stable: isStable,
+            is_dead: isDead,
+        });
+
+        await this.supabase.from('game_logs').insert({
+            id: crypto.randomUUID(),
+            game_id: actor.game_id,
+            actor_in_game_id: actorId,
+            action_type: 'death.save',
+            payload: {
+                roll,
+                success,
+                fail,
+                is_stable: isStable,
+                is_dead: isDead,
+            },
+        });
+
+        return {
+            roll,
+            success,
+            fail,
+            is_stable: isStable,
+            is_dead: isDead,
+        };
     }
 }

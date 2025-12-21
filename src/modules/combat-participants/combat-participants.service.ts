@@ -146,6 +146,50 @@ export class CombatParticipantsService {
         return this.list(gameId);
     }
 
+    private async cleanupExpiredConditions(
+        gameId: string,
+        currentRound: number,
+    ) {
+        const { data: expired } = await this.supabase
+            .from('actor_conditions')
+            .select(`
+            id,
+            actor_in_game_id,
+            conditions ( name )
+        `)
+            .lte('expires_on_round', currentRound)
+            .not('expires_on_round', 'is', null);
+
+        if (!expired || expired.length === 0) return;
+
+        const ids = expired.map(c => c.id);
+
+        await this.supabase
+            .from('actor_conditions')
+            .delete()
+            .in('id', ids);
+
+        for (const cond of expired) {
+            this.realtime.emitToGame(gameId, 'condition.removed', {
+                actor_id: cond.actor_in_game_id,
+                condition: cond.conditions[0]?.name,
+                reason: 'expired',
+            });
+
+            await this.supabase.from('game_logs').insert({
+                id: crypto.randomUUID(),
+                game_id: gameId,
+                actor_in_game_id: cond.actor_in_game_id,
+                action_type: 'condition.expired',
+                payload: {
+                    condition: cond.conditions[0]?.name,
+                    round: currentRound,
+                },
+            });
+        }
+    }
+
+
     async nextTurn(gameId: string, userId: string) {
         await this.assertDm(gameId, userId);
 
@@ -162,8 +206,11 @@ export class CombatParticipantsService {
             throw new BadRequestException('No participants');
         }
 
-        const nextIndex =
-            (combat.current_turn_index + 1) % participants.length;
+        let nextIndex = combat.current_turn_index + 1;
+
+        if (nextIndex >= participants.length) {
+            return this.advanceRound(combat, gameId);
+        }
 
         const activeParticipant = participants[nextIndex];
 
@@ -179,6 +226,7 @@ export class CombatParticipantsService {
         this.realtime.emitToGame(gameId, 'combat.turn.changed', {
             game_id: gameId,
             combat_id: combat.id,
+            round: combat.round,
             current_turn_index: nextIndex,
             active_participant_id: activeParticipant.id,
         });
@@ -188,52 +236,16 @@ export class CombatParticipantsService {
             game_id: gameId,
             action_type: 'combat.turn.changed',
             payload: {
+                round: combat.round,
                 current_turn_index: nextIndex,
                 active_participant_id: activeParticipant.id,
             },
         });
 
-        const now = new Date();
-
-        const { data: expiredConditions } = await this.supabase
-            .from('actor_conditions')
-            .select(`
-    id,
-    actor_in_game_id,
-    conditions ( name )
-  `)
-            .eq('game_id', gameId)
-            .lt('expires_at', now);
-
-        if (expiredConditions && expiredConditions.length > 0) {
-            const ids = expiredConditions.map(c => c.id);
-
-            await this.supabase
-                .from('actor_conditions')
-                .delete()
-                .in('id', ids);
-
-            for (const actorCondition of expiredConditions) {
-                this.realtime.emitToGame(gameId, 'condition.removed', {
-                    actor_id: actorCondition.actor_in_game_id,
-                    condition: actorCondition.conditions[0]?.name,
-                });
-
-                await this.supabase.from('game_logs').insert({
-                    id: crypto.randomUUID(),
-                    game_id: gameId,
-                    actor_in_game_id: actorCondition.actor_in_game_id,
-                    action_type: 'condition.removed',
-                    payload: {
-                        condition: actorCondition.conditions[0]?.name,
-                    },
-                });
-            }
-        }
-
-
         return updatedCombat;
     }
+
+
 
     async remove(
         gameId: string,
@@ -273,4 +285,50 @@ export class CombatParticipantsService {
                 .eq('id', participants[i].id);
         }
     }
+
+    async forceAdvanceRound(gameId: string, userId: string) {
+        await this.assertDm(gameId, userId);
+
+        const combat = await this.getActiveCombat(gameId);
+
+        return this.advanceRound(combat, gameId);
+    }
+
+
+    private async advanceRound(
+        combat: any,
+        gameId: string,
+    ) {
+        const nextRound = combat.round + 1;
+
+        const { data: updatedCombat } = await this.supabase
+            .from('combats')
+            .update({
+                round: nextRound,
+                current_turn_index: 0,
+            })
+            .eq('id', combat.id)
+            .select()
+            .single();
+
+        await this.cleanupExpiredConditions(gameId, nextRound);
+
+        this.realtime.emitToGame(gameId, 'combat.round.advanced', {
+            game_id: gameId,
+            combat_id: combat.id,
+            round: nextRound,
+        });
+
+        await this.supabase.from('game_logs').insert({
+            id: crypto.randomUUID(),
+            game_id: gameId,
+            action_type: 'combat.round.advanced',
+            payload: {
+                round: nextRound,
+            },
+        });
+
+        return updatedCombat;
+    }
+
 }

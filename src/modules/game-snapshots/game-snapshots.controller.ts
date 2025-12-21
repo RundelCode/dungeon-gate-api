@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { GameSnapshotsService } from './game-snapshots.service';
-import { CreateSnapshotDto } from './dto/create-snapshot.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('games/:gameId/snapshots')
@@ -20,15 +19,15 @@ export class GameSnapshotsController {
     ) { }
 
     @Post()
-    create(
+    createManual(
         @Req() req,
         @Param('gameId') gameId: string,
-        @Body() dto: CreateSnapshotDto,
+        @Body('label') label?: string,
     ) {
-        return this.service.create(
+        return this.service.createManual(
             gameId,
             req.user.id,
-            dto,
+            label ?? 'manual_snapshot',
         );
     }
 

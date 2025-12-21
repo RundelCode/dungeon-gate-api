@@ -25,9 +25,10 @@ import { HealthModule } from './health/health.module';
 import { SupabaseModule } from './db/supabase.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { SpellCastingModule } from './modules/spell-casting/spell-casting.module';
+import { SavingThrowsModule } from './modules/saving-throws/saving-throws.module';
 
 @Module({
-  imports: [UploadsModule,SpellCastingModule, AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
+  imports: [UploadsModule,SpellCastingModule,SavingThrowsModule, AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
   controllers: [AppController],
   providers: [AppService, GameGateway],
 })

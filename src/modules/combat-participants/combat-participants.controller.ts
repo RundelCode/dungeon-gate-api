@@ -80,4 +80,16 @@ export class CombatParticipantsController {
             req.user.id,
         );
     }
+
+    @Post('round/advance')
+    async advanceRound(
+        @Param('gameId') gameId: string,
+        @Req() req: any,
+    ) {
+        return this.service.forceAdvanceRound(
+            gameId,
+            req.user.id,
+        );
+    }
+
 }

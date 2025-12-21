@@ -26,7 +26,6 @@ export class GameGateway
     private readonly supabase: SupabaseClient,
   ) { }
 
-
   async handleConnection(client: Socket) {
     try {
       const token =
@@ -50,28 +49,24 @@ export class GameGateway
         email: data.user.email,
       };
 
-      console.log(
-        `🔌 Socket connected: ${data.user.email}`,
-      );
+      client.emit('socket.ready', {
+        user_id: data.user.id,
+      });
     } catch {
       client.disconnect();
     }
   }
 
-  handleDisconnect(client: Socket) {
-    console.log('❌ Socket disconnected');
-  }
-
+  handleDisconnect(client: Socket) { }
 
   @SubscribeMessage('game.join')
-  async joinGame(
+  joinGame(
     @ConnectedSocket() client: Socket,
     @MessageBody() gameId: string,
   ) {
     client.join(`game:${gameId}`);
     return { joined: gameId };
   }
-
 
   @SubscribeMessage('game.leave')
   leaveGame(
@@ -81,7 +76,6 @@ export class GameGateway
     client.leave(`game:${gameId}`);
     return { left: gameId };
   }
-
 
   emitToGame(
     gameId: string,

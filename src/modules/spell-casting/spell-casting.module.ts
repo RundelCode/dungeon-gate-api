@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common';
-import { SpellCastingController } from './spell-casting.controller';
 import { SpellCastingService } from './spell-casting.service';
+import { SpellCastingController } from './spell-casting.controller';
+import { CombatsModule } from '../combats/combats.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
+  imports: [CombatsModule, RealtimeModule],
   controllers: [SpellCastingController],
-  providers: [SpellCastingService]
+  providers: [SpellCastingService],
 })
-export class SpellCastingModule {}
+export class SpellCastingModule { }

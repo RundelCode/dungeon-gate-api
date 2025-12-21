@@ -5,10 +5,10 @@ import {
     BadRequestException,
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { CastSpellDto } from './dto/cast-spell.dto';
 import { CombatService } from '../combats/combats.service';
 import { GameGateway } from '../realtime/game.gateway';
 import * as crypto from 'crypto';
-import { CastSpellDto } from './dto/cast-spell.dto';
 
 @Injectable()
 export class SpellCastingService {
@@ -19,11 +19,7 @@ export class SpellCastingService {
         private readonly realtime: GameGateway,
     ) { }
 
-    async castSpell(
-        gameId: string,
-        userId: string,
-        dto: CastSpellDto,
-    ) {
+    async cast(gameId: string, userId: string, dto: CastSpellDto) {
         await this.combatsService.assertCanAct(gameId, userId);
 
         const { data: spell } = await this.supabase
@@ -38,24 +34,13 @@ export class SpellCastingService {
 
         const { data: caster } = await this.supabase
             .from('actors_in_game')
-            .select('id')
+            .select('id, resources_json')
             .eq('id', dto.caster_actor_id)
             .eq('game_id', gameId)
             .single();
 
         if (!caster) {
             throw new NotFoundException('Caster not found');
-        }
-
-        const { data: target } = await this.supabase
-            .from('actors_in_game')
-            .select('id, current_hp')
-            .eq('id', dto.target_actor_id)
-            .eq('game_id', gameId)
-            .single();
-
-        if (!target) {
-            throw new NotFoundException('Target not found');
         }
 
         const { data: slot } = await this.supabase
@@ -71,33 +56,36 @@ export class SpellCastingService {
 
         await this.supabase
             .from('character_spell_slots')
-            .update({
-                slots_used: slot.slots_used + 1,
-            })
+            .update({ slots_used: slot.slots_used + 1 })
             .eq('id', slot.id);
 
-        const damage =
-            dto.forced_damage ??
-            (spell.damage_formula
-                ? this.rollDamage(spell.damage_formula)
-                : 0);
+        let result: any = { spell_id: spell.id };
 
-        const newHp = Math.max(0, target.current_hp - damage);
+        if (spell.attack_type === 'attack') {
+            result = await this.resolveAttackSpell(gameId, spell, dto);
+        }
 
-        await this.supabase
-            .from('actors_in_game')
-            .update({
-                current_hp: newHp,
-                updated_at: new Date(),
-            })
-            .eq('id', target.id);
+        if (spell.attack_type === 'save') {
+            result = await this.resolveSaveSpell(gameId, spell, dto);
+        }
+
+        if (spell.is_concentration) {
+            const resources = caster.resources_json ?? {};
+            resources.concentration = {
+                spell_id: spell.id,
+                started_at: new Date().toISOString(),
+            };
+
+            await this.supabase
+                .from('actors_in_game')
+                .update({ resources_json: resources })
+                .eq('id', caster.id);
+        }
 
         this.realtime.emitToGame(gameId, 'spell.cast', {
-            spell_id: spell.id,
+            game_id: gameId,
             caster_actor_id: caster.id,
-            target_actor_id: target.id,
-            damage,
-            current_hp: newHp,
+            ...result,
         });
 
         await this.supabase.from('game_logs').insert({
@@ -105,17 +93,98 @@ export class SpellCastingService {
             game_id: gameId,
             actor_in_game_id: caster.id,
             action_type: 'spell.cast',
-            payload: {
-                spell_id: spell.id,
-                target_actor_id: target.id,
-                damage,
-            },
+            payload: result,
+        });
+
+        return result;
+    }
+
+    private async resolveAttackSpell(gameId: string, spell: any, dto: CastSpellDto) {
+        const { data: target } = await this.supabase
+            .from('actors_in_game')
+            .select('id, current_hp, armor_class')
+            .eq('id', dto.target_actor_id)
+            .eq('game_id', gameId)
+            .single();
+
+        if (!target) {
+            throw new NotFoundException('Target not found');
+        }
+
+        const roll = this.d20();
+        const hit = roll >= target.armor_class;
+        const crit = roll === 20;
+
+        let damage = 0;
+        if (hit && spell.damage_formula) {
+            damage = this.rollDamage(spell.damage_formula);
+            if (crit) damage *= 2;
+        }
+
+        const newHp = Math.max(0, target.current_hp - damage);
+
+        await this.supabase
+            .from('actors_in_game')
+            .update({ current_hp: newHp })
+            .eq('id', target.id);
+
+        this.realtime.emitToGame(gameId, 'actor.hp.updated', {
+            actor_id: target.id,
+            current_hp: newHp,
+            delta: -damage,
         });
 
         return {
-            success: true,
+            target_actor_id: target.id,
+            roll,
+            hit,
+            crit,
             damage,
-            target_hp: newHp,
+            current_hp: newHp,
+        };
+    }
+
+    private async resolveSaveSpell(gameId: string, spell: any, dto: CastSpellDto) {
+        const { data: target } = await this.supabase
+            .from('actors_in_game')
+            .select('id, current_hp')
+            .eq('id', dto.target_actor_id)
+            .eq('game_id', gameId)
+            .single();
+
+        if (!target) {
+            throw new NotFoundException('Target not found');
+        }
+
+        const saveRoll = this.d20();
+        const dc = 10 + spell.level;
+        const success = saveRoll >= dc;
+
+        let damage = 0;
+        if (spell.damage_formula) {
+            damage = this.rollDamage(spell.damage_formula);
+            if (success) damage = Math.floor(damage / 2);
+        }
+
+        const newHp = Math.max(0, target.current_hp - damage);
+
+        await this.supabase
+            .from('actors_in_game')
+            .update({ current_hp: newHp })
+            .eq('id', target.id);
+
+        this.realtime.emitToGame(gameId, 'actor.hp.updated', {
+            actor_id: target.id,
+            current_hp: newHp,
+            delta: -damage,
+        });
+
+        return {
+            target_actor_id: target.id,
+            save_roll: saveRoll,
+            success,
+            damage,
+            current_hp: newHp,
         };
     }
 
@@ -132,5 +201,9 @@ export class SpellCastingService {
         }
 
         return total;
+    }
+
+    private d20(): number {
+        return Math.floor(Math.random() * 20) + 1;
     }
 }

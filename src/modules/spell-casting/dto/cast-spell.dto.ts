@@ -7,13 +7,10 @@ export class CastSpellDto {
     @IsUUID()
     caster_actor_id: string;
 
+    @IsOptional()
     @IsUUID()
-    target_actor_id: string;
+    target_actor_id?: string;
 
     @IsInt()
     spell_level: number;
-
-    @IsOptional()
-    @IsInt()
-    forced_damage?: number;
 }

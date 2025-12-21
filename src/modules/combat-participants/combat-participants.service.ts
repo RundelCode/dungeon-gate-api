@@ -193,6 +193,45 @@ export class CombatParticipantsService {
             },
         });
 
+        const now = new Date();
+
+        const { data: expiredConditions } = await this.supabase
+            .from('actor_conditions')
+            .select(`
+    id,
+    actor_in_game_id,
+    conditions ( name )
+  `)
+            .eq('game_id', gameId)
+            .lt('expires_at', now);
+
+        if (expiredConditions && expiredConditions.length > 0) {
+            const ids = expiredConditions.map(c => c.id);
+
+            await this.supabase
+                .from('actor_conditions')
+                .delete()
+                .in('id', ids);
+
+            for (const actorCondition of expiredConditions) {
+                this.realtime.emitToGame(gameId, 'condition.removed', {
+                    actor_id: actorCondition.actor_in_game_id,
+                    condition: actorCondition.conditions[0]?.name,
+                });
+
+                await this.supabase.from('game_logs').insert({
+                    id: crypto.randomUUID(),
+                    game_id: gameId,
+                    actor_in_game_id: actorCondition.actor_in_game_id,
+                    action_type: 'condition.removed',
+                    payload: {
+                        condition: actorCondition.conditions[0]?.name,
+                    },
+                });
+            }
+        }
+
+
         return updatedCombat;
     }
 

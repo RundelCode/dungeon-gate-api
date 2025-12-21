@@ -14,7 +14,7 @@ export class SpellCastingController {
         @Param('gameId') gameId: string,
         @Body() dto: CastSpellDto,
     ) {
-        return this.service.castSpell(
+        return this.service.cast(
             gameId,
             req.user.id,
             dto,

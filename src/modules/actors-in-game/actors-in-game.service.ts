@@ -12,7 +12,6 @@ import { UpdateHpDto } from './dto/update-hp.dto';
 import { randomUUID } from 'crypto';
 import { GameGateway } from '../realtime/game.gateway';
 import * as crypto from 'crypto';
-import { CombatService } from '../combats/combats.service';
 
 @Injectable()
 export class ActorsInGameService {
@@ -20,8 +19,60 @@ export class ActorsInGameService {
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
         private readonly realtime: GameGateway,
-        private readonly combatsService: CombatService,
     ) { }
+
+    private d20(): number {
+        return Math.floor(Math.random() * 20) + 1;
+    }
+    private async checkConcentration(
+        actor: any,
+        damage: number,
+        gameId: string,
+    ) {
+        if (!actor.base_character_id) return;
+
+        const { data: character } = await this.supabase
+            .from('characters')
+            .select('con')
+            .eq('id', actor.base_character_id)
+            .single();
+
+        if (!character) return;
+
+        const conMod = Math.floor((character.con - 10) / 2);
+        const roll = this.d20() + conMod;
+        const dc = Math.max(10, Math.floor(damage / 2));
+
+        if (roll >= dc) return;
+
+        const resources = actor.resources_json ?? {};
+        delete resources.concentration;
+
+        await this.supabase
+            .from('actors_in_game')
+            .update({
+                resources_json: resources,
+            })
+            .eq('id', actor.id);
+
+        this.realtime.emitToGame(gameId, 'spell.concentration.broken', {
+            actor_id: actor.id,
+        });
+
+        await this.supabase.from('game_logs').insert({
+            id: crypto.randomUUID(),
+            game_id: gameId,
+            actor_in_game_id: actor.id,
+            action_type: 'spell.concentration.broken',
+            payload: {
+                dc,
+                roll,
+            },
+        });
+    }
+
+
+
 
     private async assertMember(gameId: string, userId: string) {
         const { data } = await this.supabase
@@ -205,7 +256,14 @@ export class ActorsInGameService {
     ) {
         const { data: actor } = await this.supabase
             .from('actors_in_game')
-            .select('id, game_id, current_hp, temp_hp')
+            .select(`
+      id,
+      game_id,
+      current_hp,
+      temp_hp,
+      resources_json,
+      base_character_id
+    `)
             .eq('id', actorId)
             .single();
 
@@ -213,10 +271,9 @@ export class ActorsInGameService {
             throw new NotFoundException('Actor not found');
         }
 
-        await this.combatsService.assertCanAct(
-            actor.game_id,
-            userId,
-        );
+        const gameId = actor.game_id;
+
+        await this.assertDm(gameId, userId);
 
         let remainingDelta = dto.delta;
         let tempHp = actor.temp_hp;
@@ -242,9 +299,9 @@ export class ActorsInGameService {
             .select()
             .single();
 
-        this.realtime.emitToGame(actor.game_id, 'actor.hp.updated', {
+        this.realtime.emitToGame(gameId, 'actor.hp.updated', {
             actor_id: actorId,
-            game_id: actor.game_id,
+            game_id: gameId,
             current_hp: updated.current_hp,
             temp_hp: updated.temp_hp,
             delta: dto.delta,
@@ -252,7 +309,7 @@ export class ActorsInGameService {
 
         await this.supabase.from('game_logs').insert({
             id: crypto.randomUUID(),
-            game_id: actor.game_id,
+            game_id: gameId,
             actor_in_game_id: actorId,
             action_type: 'actor.hp.updated',
             payload: {
@@ -267,6 +324,14 @@ export class ActorsInGameService {
                 delta: dto.delta,
             },
         });
+
+        if (dto.delta < 0 && actor.resources_json?.concentration) {
+            await this.checkConcentration(
+                actor,
+                Math.abs(dto.delta),
+                gameId,
+            );
+        }
 
         return updated;
     }

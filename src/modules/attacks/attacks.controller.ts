@@ -1,38 +1,27 @@
-import {
-    Controller,
-    Post,
-    Param,
-    Body,
-    Req,
-    UseGuards,
-} from '@nestjs/common';
+import { Controller, Post, Param, Body, Req, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AttacksService } from './attacks.service';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { PerformAttackDto } from './dto/perform-attack.dto';
 
-@Controller('games/:gameId/attacks')
 @UseGuards(JwtAuthGuard)
+@Controller('games/:gameId/attacks')
 export class AttacksController {
-    constructor(
-        private readonly attacksService: AttacksService,
-    ) { }
+    constructor(private readonly service: AttacksService) { }
 
-    @Post(':attackId/execute')
-    async executeAttack(
+    @Post()
+    execute(
+        @Req() req,
         @Param('gameId') gameId: string,
-        @Param('attackId') attackId: string,
-        @Body()
-        body: {
-            attacker_actor_id: string;
-            target_actor_id: string;
-        },
-        @Req() req: any,
+        @Body() dto: PerformAttackDto,
     ) {
-        return this.attacksService.executeAttack(
+        return this.service.executeAttack(
             gameId,
             req.user.id,
-            attackId,
-            body.attacker_actor_id,
-            body.target_actor_id,
+            dto.attack_id,
+            dto.attacker_actor_id,
+            dto.target_actor_id,
+            dto.advantage,
+            dto.disadvantage,
         );
     }
 }

@@ -5,13 +5,8 @@ import {
     BadRequestException,
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { GameGateway } from '../realtime/game.gateway';
+import { RealtimeService } from '../realtime/realtime.service';
 import { SavingThrowsService } from '../saving-throws/saving-throws.service';
-import {
-    rollD20,
-    rollDamage,
-    resolveRollMode,
-} from '../../utils/dice.util';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -19,7 +14,7 @@ export class AttacksService {
     constructor(
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
-        private readonly realtime: GameGateway,
+        private readonly realtime: RealtimeService,
         private readonly savingThrows: SavingThrowsService,
     ) { }
 
@@ -29,20 +24,16 @@ export class AttacksService {
         attackId: string,
         attackerActorId: string,
         targetActorId: string,
-        advantage?: boolean,
-        disadvantage?: boolean,
+        advantage = false,
+        disadvantage = false,
     ) {
-        const rollMode = resolveRollMode(advantage, disadvantage);
-
         const { data: attack } = await this.supabase
             .from('character_attacks')
             .select('*')
             .eq('id', attackId)
             .single();
 
-        if (!attack) {
-            throw new NotFoundException('Attack not found');
-        }
+        if (!attack) throw new NotFoundException('Attack not found');
 
         const { data: attacker } = await this.supabase
             .from('actors_in_game')
@@ -53,7 +44,7 @@ export class AttacksService {
 
         const { data: target } = await this.supabase
             .from('actors_in_game')
-            .select('id, armor_class, current_hp')
+            .select('id, armor_class, current_hp, temp_hp, is_conscious')
             .eq('id', targetActorId)
             .eq('game_id', gameId)
             .single();
@@ -62,65 +53,78 @@ export class AttacksService {
             throw new BadRequestException('Invalid actors');
         }
 
-        const roll = rollD20(rollMode);
-        const hit = roll >= target.armor_class;
-        const crit = roll === 20;
+        const rollData = this.rollD20(advantage, disadvantage);
+        const hit = rollData.total >= target.armor_class;
+        const crit = rollData.natural === 20;
 
         let damage = 0;
         if (hit && attack.damage_formula) {
-            damage = rollDamage(attack.damage_formula);
+            damage = this.rollDamage(attack.damage_formula);
             if (crit) damage *= 2;
         }
 
-        const newHp = Math.max(0, target.current_hp - damage);
+        let remaining = damage;
+        let tempHp = target.temp_hp ?? 0;
+        let hp = target.current_hp;
 
-        await this.supabase
+        if (remaining > 0 && tempHp > 0) {
+            const absorbed = Math.min(tempHp, remaining);
+            tempHp -= absorbed;
+            remaining -= absorbed;
+        }
+
+        hp = Math.max(0, hp - remaining);
+
+        const { data: updated } = await this.supabase
             .from('actors_in_game')
-            .update({ current_hp: newHp })
-            .eq('id', target.id);
+            .update({
+                current_hp: hp,
+                temp_hp: tempHp,
+                is_conscious: hp > 0,
+                updated_at: new Date(),
+            })
+            .eq('id', target.id)
+            .select()
+            .single();
 
-        this.realtime.emitToGame(gameId, 'attack.resolved', {
-            attacker_actor_id: attacker.id,
-            target_actor_id: target.id,
-            roll,
-            roll_mode: rollMode,
-            hit,
-            crit,
-            damage,
-            current_hp: newHp,
-        });
-
-        await this.applyAttackConditions(
+        const appliedConditions = await this.applyAttackConditions(
             gameId,
             attack,
             target.id,
             hit,
         );
 
+        const payload = {
+            attacker_actor_id: attacker.id,
+            target_actor_id: target.id,
+            attack_id: attack.id,
+            roll: {
+                natural: rollData.natural,
+                total: rollData.total,
+                mode: rollData.mode,
+            },
+            hit,
+            crit,
+            damage,
+            actor_state: {
+                current_hp: updated.current_hp,
+                temp_hp: updated.temp_hp,
+                is_conscious: updated.is_conscious,
+            },
+            conditions_applied: appliedConditions,
+        };
+
+        this.realtime.attackResolved(gameId, payload);
+
         await this.supabase.from('game_logs').insert({
             id: crypto.randomUUID(),
             game_id: gameId,
             actor_in_game_id: attacker.id,
-            action_type: 'attack.executed',
-            payload: {
-                attack: attack.name,
-                roll,
-                roll_mode: rollMode,
-                hit,
-                crit,
-                damage,
-                target_actor_id: target.id,
-            },
+            action_type: 'attack.resolved',
+            payload,
         });
 
-        return {
-            roll,
-            roll_mode: rollMode,
-            hit,
-            crit,
-            damage,
-            current_hp: newHp,
-        };
+        return payload;
     }
 
     private async applyAttackConditions(
@@ -129,7 +133,7 @@ export class AttacksService {
         targetActorId: string,
         hit: boolean,
     ) {
-        if (!attack.conditions_json) return;
+        if (!attack.conditions_json) return [];
 
         const { data: combat } = await this.supabase
             .from('combats')
@@ -138,31 +142,31 @@ export class AttacksService {
             .eq('is_active', true)
             .single();
 
-        const currentRound = combat?.round ?? 1;
+        const round = combat?.round ?? 1;
+        const applied: any[] = [];
 
         for (const cond of attack.conditions_json) {
             if (cond.on === 'hit' && !hit) continue;
 
             if (cond.requires_save) {
                 const save = this.savingThrows.rollSavingThrow({
-                    ability: cond.requires_save.ability,
                     dc: cond.requires_save.dc,
+                    modifier: cond.requires_save.modifier ?? 0,
                 });
-
                 if (save.success) continue;
             }
 
-            const expiresRound =
+            const expires_on_round =
                 cond.duration_rounds != null
-                    ? currentRound + cond.duration_rounds
+                    ? round + cond.duration_rounds
                     : null;
 
             await this.supabase.from('actor_conditions').insert({
                 id: crypto.randomUUID(),
                 actor_in_game_id: targetActorId,
                 condition_id: cond.condition_id,
-                applied_on_round: currentRound,
-                expires_on_round: expiresRound,
+                applied_on_round: round,
+                expires_on_round,
             });
 
             const { data: condition } = await this.supabase
@@ -171,22 +175,45 @@ export class AttacksService {
                 .eq('id', cond.condition_id)
                 .single();
 
-            this.realtime.emitToGame(gameId, 'condition.applied', {
-                actor_id: targetActorId,
-                condition: condition?.name,
-                expires_on_round: expiresRound,
-            });
-
-            await this.supabase.from('game_logs').insert({
-                id: crypto.randomUUID(),
-                game_id: gameId,
-                actor_in_game_id: targetActorId,
-                action_type: 'condition.applied',
-                payload: {
-                    condition: condition?.name,
-                    expires_on_round: expiresRound,
-                },
+            applied.push({
+                condition_id: cond.condition_id,
+                name: condition?.name,
+                expires_on_round,
             });
         }
+
+        return applied;
+    }
+
+    private rollDamage(formula: string): number {
+        const m = formula.match(/(\d+)d(\d+)(\s*\+\s*\d+)?/);
+        if (!m) return 0;
+
+        const rolls = Number(m[1]);
+        const die = Number(m[2]);
+        const bonus = m[3] ? Number(m[3].replace('+', '')) : 0;
+
+        let total = bonus;
+        for (let i = 0; i < rolls; i++) {
+            total += Math.floor(Math.random() * die) + 1;
+        }
+        return total;
+    }
+
+    private rollD20(adv = false, dis = false) {
+        const r1 = this.d20();
+        const r2 = this.d20();
+
+        if (adv && !dis) {
+            return { natural: Math.max(r1, r2), total: Math.max(r1, r2), mode: 'advantage' };
+        }
+        if (dis && !adv) {
+            return { natural: Math.min(r1, r2), total: Math.min(r1, r2), mode: 'disadvantage' };
+        }
+        return { natural: r1, total: r1, mode: 'normal' };
+    }
+
+    private d20(): number {
+        return Math.floor(Math.random() * 20) + 1;
     }
 }

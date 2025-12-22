@@ -10,15 +10,15 @@ import { CreateActorDto } from './dto/create-actor.dto';
 import { UpdateActorDto } from './dto/update-actor.dto';
 import { UpdateHpDto } from './dto/update-hp.dto';
 import { randomUUID } from 'crypto';
-import { GameGateway } from '../realtime/game.gateway';
 import * as crypto from 'crypto';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class ActorsInGameService {
     constructor(
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
-        private readonly realtime: GameGateway,
+        private readonly realtime: RealtimeService,
     ) { }
 
     private d20(): number {
@@ -54,7 +54,7 @@ export class ActorsInGameService {
             .update({ resources_json: resources })
             .eq('id', actor.id);
 
-        this.realtime.emitToGame(gameId, 'spell.concentration.broken', {
+        this.realtime.spellConcentrationBroken(gameId, {
             actor_id: actor.id,
         });
 
@@ -177,11 +177,7 @@ export class ActorsInGameService {
         return data;
     }
 
-    async updateHp(
-        actorId: string,
-        userId: string,
-        dto: UpdateHpDto,
-    ) {
+    async updateHp(actorId: string, userId: string, dto: UpdateHpDto) {
         const { data: actor } = await this.supabase
             .from('actors_in_game')
             .select(`
@@ -254,7 +250,7 @@ export class ActorsInGameService {
             .select()
             .single();
 
-        this.realtime.emitToGame(actor.game_id, 'actor.hp.updated', {
+        this.realtime.actorUpdated(actor.game_id, {
             actor_id: actorId,
             current_hp: updated.current_hp,
             temp_hp: updated.temp_hp,
@@ -328,7 +324,7 @@ export class ActorsInGameService {
             })
             .eq('id', actorId);
 
-        this.realtime.emitToGame(actor.game_id, 'actor.death.save', {
+        this.realtime.actorDeathSave(actor.game_id, {
             actor_id: actorId,
             roll,
             success,
@@ -358,5 +354,79 @@ export class ActorsInGameService {
             is_stable: isStable,
             is_dead: isDead,
         };
+    }
+
+    async remove(actorId: string, userId: string) {
+        const { data: actor } = await this.supabase
+            .from('actors_in_game')
+            .select('id, game_id')
+            .eq('id', actorId)
+            .single();
+
+        if (!actor) {
+            throw new NotFoundException('Actor not found');
+        }
+
+        await this.assertDm(actor.game_id, userId);
+
+        await this.supabase
+            .from('actors_in_game')
+            .delete()
+            .eq('id', actorId);
+
+        this.realtime.emit(actor.game_id, 'actor.removed', {
+            actor_id: actorId,
+        });
+
+        await this.supabase.from('game_logs').insert({
+            id: crypto.randomUUID(),
+            game_id: actor.game_id,
+            actor_in_game_id: actorId,
+            action_type: 'actor.removed',
+            payload: {},
+        });
+
+        return { success: true };
+    }
+
+    async spawnFromCharacter(
+        gameId: string,
+        characterId: string,
+        userId: string,
+        nameOverride?: string,
+    ) {
+        await this.assertDm(gameId, userId);
+
+        const { data: character, error: charError } =
+            await this.supabase
+                .from('characters')
+                .select('*')
+                .eq('id', characterId)
+                .single();
+
+        if (charError || !character) {
+            throw new NotFoundException('Character not found');
+        }
+
+        const actorId = randomUUID();
+
+        await this.supabase
+            .from('actors_in_game')
+            .insert({
+                id: actorId,
+                game_id: gameId,
+                base_character_id: character.id,
+                name_override: nameOverride ?? character.name,
+                current_hp: character.max_hp,
+                temp_hp: 0,
+                max_hp_override: character.max_hp,
+                resources_json: {},
+                death_saves_success: 0,
+                death_saves_fail: 0,
+                is_conscious: true,
+                is_stable: true,
+            });
+
+        return this.findOne(actorId, userId);
     }
 }

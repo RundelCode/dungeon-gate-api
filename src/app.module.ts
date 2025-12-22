@@ -30,6 +30,6 @@ import { SavingThrowsModule } from './modules/saving-throws/saving-throws.module
 @Module({
   imports: [UploadsModule,SpellCastingModule,SavingThrowsModule, AppConfigModule, UsersModule, GamesModule, GamePlayersModule, ScenesModule, TokensModule, GameSnapshotsModule, GameLogsModule, CombatsModule, CombatParticipantsModule, CharactersModule, MonstersModule, ActorsInGameModule, ClassesModule, RacesModule, BackgroundsModule, SpellsModule, ItemsModule, ConditionsModule, SupabaseModule, HealthModule],
   controllers: [AppController],
-  providers: [AppService, GameGateway],
+  providers: [AppService],
 })
 export class AppModule { }

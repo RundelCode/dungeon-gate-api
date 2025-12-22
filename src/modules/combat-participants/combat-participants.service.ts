@@ -9,15 +9,15 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { AddParticipantDto } from './dto/add-participant.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
-import { GameGateway } from '../realtime/game.gateway';
 import * as crypto from 'crypto';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class CombatParticipantsService {
     constructor(
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
-        private readonly realtime: GameGateway,
+        private readonly realtime: RealtimeService,
     ) { }
 
     private async assertDm(gameId: string, userId: string) {
@@ -62,9 +62,7 @@ export class CombatParticipantsService {
             .single();
 
         if (!actor) {
-            throw new BadRequestException(
-                'Actor does not belong to this game',
-            );
+            throw new BadRequestException('Actor does not belong to this game');
         }
 
         const { data: existing } = await this.supabase
@@ -105,17 +103,17 @@ export class CombatParticipantsService {
         const { data, error } = await this.supabase
             .from('combat_participants')
             .select(`
-        id,
-        initiative,
-        turn_order,
-        is_active,
-        is_conscious,
-        actors_in_game (
-          id,
-          name_override,
-          current_hp
-        )
-      `)
+                id,
+                initiative,
+                turn_order,
+                is_active,
+                is_conscious,
+                actors_in_game (
+                    id,
+                    name_override,
+                    current_hp
+                )
+            `)
             .eq('combat_id', combat.id)
             .order('turn_order');
 
@@ -153,10 +151,10 @@ export class CombatParticipantsService {
         const { data: expired } = await this.supabase
             .from('actor_conditions')
             .select(`
-            id,
-            actor_in_game_id,
-            conditions ( name )
-        `)
+                id,
+                actor_in_game_id,
+                conditions ( name )
+            `)
             .lte('expires_on_round', currentRound)
             .not('expires_on_round', 'is', null);
 
@@ -170,7 +168,7 @@ export class CombatParticipantsService {
             .in('id', ids);
 
         for (const cond of expired) {
-            this.realtime.emitToGame(gameId, 'condition.removed', {
+            this.realtime.conditionRemoved(gameId, {
                 actor_id: cond.actor_in_game_id,
                 condition: cond.conditions[0]?.name,
                 reason: 'expired',
@@ -188,7 +186,6 @@ export class CombatParticipantsService {
             });
         }
     }
-
 
     async nextTurn(gameId: string, userId: string) {
         await this.assertDm(gameId, userId);
@@ -223,7 +220,7 @@ export class CombatParticipantsService {
             .select()
             .single();
 
-        this.realtime.emitToGame(gameId, 'combat.turn.changed', {
+        this.realtime.combatTurnChanged(gameId, {
             game_id: gameId,
             combat_id: combat.id,
             round: combat.round,
@@ -244,8 +241,6 @@ export class CombatParticipantsService {
 
         return updatedCombat;
     }
-
-
 
     async remove(
         gameId: string,
@@ -294,7 +289,6 @@ export class CombatParticipantsService {
         return this.advanceRound(combat, gameId);
     }
 
-
     private async advanceRound(
         combat: any,
         gameId: string,
@@ -313,7 +307,7 @@ export class CombatParticipantsService {
 
         await this.cleanupExpiredConditions(gameId, nextRound);
 
-        this.realtime.emitToGame(gameId, 'combat.round.advanced', {
+        this.realtime.combatRoundChanged(gameId, {
             game_id: gameId,
             combat_id: combat.id,
             round: nextRound,
@@ -330,5 +324,4 @@ export class CombatParticipantsService {
 
         return updatedCombat;
     }
-
 }

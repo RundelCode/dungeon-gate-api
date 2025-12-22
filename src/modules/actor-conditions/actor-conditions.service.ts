@@ -7,8 +7,8 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { ApplyConditionDto } from './dto/apply-condition.dto';
 import { RemoveConditionDto } from './dto/remove-condition.dto';
 import { CombatService } from '../combats/combats.service';
-import { GameGateway } from '../realtime/game.gateway';
 import * as crypto from 'crypto';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class ActorConditionsService {
@@ -16,7 +16,7 @@ export class ActorConditionsService {
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
         private readonly combatsService: CombatService,
-        private readonly realtime: GameGateway,
+        private readonly realtime: RealtimeService,
     ) { }
 
     async apply(
@@ -55,15 +55,13 @@ export class ActorConditionsService {
                 id,
                 actor_in_game_id: actor.id,
                 condition_id: condition.id,
+                // ⚠️ recomendado: manejar expiración por rondas, no por tiempo real
                 expires_at: dto.duration_rounds
-                    ? new Date(
-                        Date.now() +
-                        dto.duration_rounds * 6000,
-                    )
+                    ? null
                     : null,
             });
 
-        this.realtime.emitToGame(gameId, 'condition.applied', {
+        this.realtime.conditionApplied(gameId, {
             actor_id: actor.id,
             condition_id: condition.id,
             duration_rounds: dto.duration_rounds ?? null,
@@ -93,10 +91,10 @@ export class ActorConditionsService {
         const { data: actorCondition } = await this.supabase
             .from('actor_conditions')
             .select(`
-        id,
-        actor_in_game_id,
-        conditions ( name )
-      `)
+                id,
+                actor_in_game_id,
+                conditions ( name )
+            `)
             .eq('id', dto.actor_condition_id)
             .single();
 
@@ -109,7 +107,7 @@ export class ActorConditionsService {
             .delete()
             .eq('id', actorCondition.id);
 
-        this.realtime.emitToGame(gameId, 'condition.removed', {
+        this.realtime.conditionRemoved(gameId, {
             actor_id: actorCondition.actor_in_game_id,
             condition_id: actorCondition.id,
         });
@@ -120,7 +118,7 @@ export class ActorConditionsService {
             actor_in_game_id: actorCondition.actor_in_game_id,
             action_type: 'condition.removed',
             payload: {
-                condition: actorCondition.conditions[0]?.name,
+                condition: actorCondition.conditions?.[0]?.name,
             },
         });
 
@@ -134,15 +132,15 @@ export class ActorConditionsService {
         const { data, error } = await this.supabase
             .from('actor_conditions')
             .select(`
-        id,
-        applied_at,
-        expires_at,
-        conditions (
-          id,
-          name,
-          description
-        )
-      `)
+                id,
+                applied_at,
+                expires_at,
+                conditions (
+                    id,
+                    name,
+                    description
+                )
+            `)
             .eq('actor_in_game_id', actorId);
 
         if (error) throw error;

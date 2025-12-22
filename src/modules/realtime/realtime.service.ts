@@ -31,8 +31,16 @@ export class RealtimeService {
         this.emit(gameId, 'spell.resolved', payload);
     }
 
+    spellConcentrationBroken(gameId: string, payload: any) {
+        this.emit(gameId, 'spell.concentration.broken', payload);
+    }
+
     actorUpdated(gameId: string, payload: any) {
         this.emit(gameId, 'actor.updated', payload);
+    }
+
+    actorDeathSave(gameId: string, payload: any) {
+        this.emit(gameId, 'actor.death.save', payload);
     }
 
     conditionApplied(gameId: string, payload: any) {
@@ -45,5 +53,9 @@ export class RealtimeService {
 
     tokenMoved(gameId: string, payload: any) {
         this.emit(gameId, 'token.moved', payload);
+    }
+
+    actorRemoved(gameId: string, payload: any) {
+        this.emit(gameId, 'actor.removed', payload);
     }
 }

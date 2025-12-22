@@ -15,12 +15,13 @@ import { CreateTokenDto } from './dto/create-token.dto';
 import { UpdateTokenDto } from './dto/update-token.dto';
 import { SpawnTokenDto } from './dto/spawn-token.dto';
 import { MoveTokenDto } from './dto/move-token.dto';
-import { GameGateway } from '../realtime/game.gateway';
 
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class TokensController {
-    constructor(private readonly tokensService: TokensService) { }
+    constructor(
+        private readonly tokensService: TokensService,
+    ) { }
 
     @Post('scenes/:sceneId/tokens')
     create(
@@ -28,7 +29,11 @@ export class TokensController {
         @Param('sceneId') sceneId: string,
         @Body() dto: CreateTokenDto,
     ) {
-        return this.tokensService.create(sceneId, req.user.id, dto);
+        return this.tokensService.create(
+            sceneId,
+            req.user.id,
+            dto,
+        );
     }
 
     @Get('scenes/:sceneId/tokens')
@@ -36,7 +41,10 @@ export class TokensController {
         @Req() req,
         @Param('sceneId') sceneId: string,
     ) {
-        return this.tokensService.findByScene(sceneId, req.user.id);
+        return this.tokensService.findByScene(
+            sceneId,
+            req.user.id,
+        );
     }
 
     @Patch('tokens/:tokenId')
@@ -45,7 +53,11 @@ export class TokensController {
         @Param('tokenId') tokenId: string,
         @Body() dto: UpdateTokenDto,
     ) {
-        return this.tokensService.update(tokenId, req.user.id, dto);
+        return this.tokensService.update(
+            tokenId,
+            req.user.id,
+            dto,
+        );
     }
 
     @Delete('tokens/:tokenId')
@@ -53,10 +65,13 @@ export class TokensController {
         @Req() req,
         @Param('tokenId') tokenId: string,
     ) {
-        return this.tokensService.remove(tokenId, req.user.id);
+        return this.tokensService.remove(
+            tokenId,
+            req.user.id,
+        );
     }
 
-    @Post('/scenes/:sceneId/actors/:actorId/token')
+    @Post('scenes/:sceneId/actors/:actorId/token')
     spawnFromActor(
         @Req() req,
         @Param('sceneId') sceneId: string,
@@ -71,8 +86,7 @@ export class TokensController {
         );
     }
 
-
-    @Patch(':tokenId/move')
+    @Patch('tokens/:tokenId/move')
     move(
         @Req() req,
         @Param('tokenId') tokenId: string,
@@ -84,6 +98,4 @@ export class TokensController {
             dto,
         );
     }
-
-
 }

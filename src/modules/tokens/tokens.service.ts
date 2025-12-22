@@ -11,14 +11,14 @@ import { UpdateTokenDto } from './dto/update-token.dto';
 import { randomUUID } from 'crypto';
 import { SpawnTokenDto } from './dto/spawn-token.dto';
 import { MoveTokenDto } from './dto/move-token.dto';
-import { GameGateway } from '../realtime/game.gateway';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class TokensService {
     constructor(
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
-        private readonly realtime: GameGateway
+        private readonly realtime: RealtimeService
     ) { }
 
     private async assertMember(sceneId: string, userId: string) {
@@ -282,13 +282,14 @@ export class TokensService {
             throw updateError;
         }
 
-        this.realtime.emitToGame(gameId, 'token.moved', {
+        this.realtime.tokenMoved(gameId, {
             token_id: updated.id,
             scene_id: scene.id,
             x: updated.x,
             y: updated.y,
             z_index: updated.z_index,
         });
+
 
         await this.supabase.from('game_logs').insert({
             id: crypto.randomUUID(),

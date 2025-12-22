@@ -7,7 +7,6 @@ import {
 import { SupabaseClient } from '@supabase/supabase-js';
 import { CastSpellDto } from './dto/cast-spell.dto';
 import { CombatService } from '../combats/combats.service';
-import { GameGateway } from '../realtime/game.gateway';
 import { SavingThrowsService } from '../saving-throws/saving-throws.service';
 import {
     rollD20,
@@ -15,6 +14,7 @@ import {
     resolveRollMode,
 } from '../../utils/dice.util';
 import * as crypto from 'crypto';
+import { RealtimeService } from '../realtime/realtime.service';
 
 type SpellTargetResult =
     | {
@@ -31,6 +31,7 @@ type SpellTargetResult =
     | {
         target_actor_id: string;
         roll: number;
+        roll_mode: 'normal' | 'advantage' | 'disadvantage';
         hit: boolean;
         crit: boolean;
         damage: number;
@@ -43,7 +44,7 @@ export class SpellCastingService {
         @Inject('SUPABASE_SERVICE_CLIENT')
         private readonly supabase: SupabaseClient,
         private readonly combatsService: CombatService,
-        private readonly realtime: GameGateway,
+        private readonly realtime: RealtimeService,
         private readonly savingThrows: SavingThrowsService,
     ) { }
 
@@ -130,7 +131,7 @@ export class SpellCastingService {
                 .eq('id', caster.id);
         }
 
-        this.realtime.emitToGame(gameId, 'spell.cast', {
+        this.realtime.spellResolved(gameId, {
             caster_actor_id: caster.id,
             spell_id: spell.id,
             roll_mode: rollMode,
@@ -190,7 +191,7 @@ export class SpellCastingService {
             .update({ current_hp: newHp })
             .eq('id', target.id);
 
-        this.realtime.emitToGame(gameId, 'actor.hp.updated', {
+        this.realtime.actorUpdated(gameId, {
             actor_id: target.id,
             delta: -damage,
             current_hp: newHp,
@@ -245,7 +246,7 @@ export class SpellCastingService {
             .update({ current_hp: newHp })
             .eq('id', target.id);
 
-        this.realtime.emitToGame(gameId, 'actor.hp.updated', {
+        this.realtime.actorUpdated(gameId, {
             actor_id: target.id,
             delta: -damage,
             current_hp: newHp,
@@ -313,7 +314,7 @@ export class SpellCastingService {
                 .eq('id', cond.condition_id)
                 .single();
 
-            this.realtime.emitToGame(gameId, 'condition.applied', {
+            this.realtime.conditionApplied(gameId, {
                 actor_id: targetActorId,
                 condition: condition?.name,
                 expires_on_round: expiresRound,

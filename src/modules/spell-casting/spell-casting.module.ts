@@ -14,4 +14,4 @@ import { SavingThrowsModule } from '../saving-throws/saving-throws.module';
   controllers: [SpellCastingController],
   providers: [SpellCastingService],
 })
-export class SpellCastingModule { }
+export class SpellCastingModule { } 

@@ -12,7 +12,7 @@ export class GamesService {
     ) { }
 
     async create(userId: string, dto: CreateGameDto) {
-        const gameId = randomUUID();
+        const gameId = randomUUID()
 
         const { error: gameError } = await this.supabase
             .from('games')
@@ -24,9 +24,10 @@ export class GamesService {
                 status: 'active',
                 max_players: dto.max_players,
                 description: dto.description,
-            });
+                cover_url: dto.cover_url ?? null, // 🖼️
+            })
 
-        if (gameError) throw gameError;
+        if (gameError) throw gameError
 
         const { error: playerError } = await this.supabase
             .from('game_players')
@@ -35,11 +36,11 @@ export class GamesService {
                 game_id: gameId,
                 user_id: userId,
                 role: 'dm',
-            });
+            })
 
-        if (playerError) throw playerError;
+        if (playerError) throw playerError
 
-        return this.findOne(gameId, userId);
+        return this.findOne(gameId, userId)
     }
 
     async findAllForUser(userId: string) {
@@ -50,8 +51,10 @@ export class GamesService {
         games (
           id,
           name,
+          description,
           status,
           mode,
+          cover_url,
           created_at
         )
       `)
@@ -61,7 +64,7 @@ export class GamesService {
         if (error) throw error;
         return data;
     }
-
+ 
     async findOne(gameId: string, userId: string) {
         const { data, error } = await this.supabase
             .from('games')
@@ -90,7 +93,7 @@ export class GamesService {
     }
 
     async update(gameId: string, userId: string, dto: UpdateGameDto) {
-        await this.assertDm(gameId, userId);
+        await this.assertDm(gameId, userId)
 
         const { data, error } = await this.supabase
             .from('games')
@@ -100,10 +103,10 @@ export class GamesService {
             })
             .eq('id', gameId)
             .select()
-            .single();
+            .single()
 
-        if (error) throw error;
-        return data;
+        if (error) throw error
+        return data
     }
 
     async archive(gameId: string, userId: string) {
@@ -139,7 +142,7 @@ export class GamesService {
     async joinGame(gameId: string, userId: string) {
         const { data: game, error: gameError } = await this.supabase
             .from('games')
-            .select('id, max_players, status')
+            .select('id, max_players, status, cover_url')
             .eq('id', gameId)
             .single();
 

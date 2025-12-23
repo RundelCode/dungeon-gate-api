@@ -1,17 +1,21 @@
-import { IsString, IsInt, IsOptional, Min } from 'class-validator';
+import { IsString, IsInt, IsOptional, Min, IsUrl } from 'class-validator'
 
 export class CreateGameDto {
     @IsString()
-    name: string;
+    name: string
 
     @IsString()
-    mode: string;
+    mode: string
 
     @IsInt()
     @Min(1)
-    max_players: number;
+    max_players: number
 
     @IsOptional()
     @IsString()
-    description?: string;
+    description?: string
+
+    @IsOptional()
+    @IsUrl()
+    cover_url?: string
 }

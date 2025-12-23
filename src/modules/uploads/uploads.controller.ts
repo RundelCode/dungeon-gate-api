@@ -14,7 +14,7 @@ import { UploadsService } from './uploads.service';
 @UseGuards(JwtAuthGuard)
 @Controller('uploads')
 export class UploadsController {
-  constructor(private readonly uploadsService: UploadsService) {}
+  constructor(private readonly uploadsService: UploadsService) { }
 
   @Post('avatar')
   @UseInterceptors(FileInterceptor('file'))
@@ -68,5 +68,17 @@ export class UploadsController {
       tokenId,
       file,
     );
+  }
+
+  @Post('games/:gameId/cover')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadGameCover(
+    @Param('gameId') gameId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.uploadsService.uploadGameCover(
+      gameId,
+      file,
+    )
   }
 }
